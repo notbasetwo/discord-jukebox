@@ -10,6 +10,7 @@ The default prefix for this bot is `!`. The commands available are:
 - **!stop** - Stop playing, clear the queue and disconnect
 - **!pause** - Pause currently playing track
 - **!resume** - Resume currently playing track
+- **!playlist** - Queue up a playlist
 
 ## How to Configure
 - Clone this repository
