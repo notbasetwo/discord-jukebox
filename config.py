@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 
@@ -16,6 +17,10 @@ class BotConfig:
 
     token: str
     prefix: str
+    max_playlist_tracks: int
+
+
+DEFAULT_MAX_PLAYLIST_TRACKS = 25
 
 
 def load_config() -> BotConfig:
@@ -32,4 +37,17 @@ def load_config() -> BotConfig:
 
     prefix = os.getenv("BOT_PREFIX", "!").strip() or "!"
 
-    return BotConfig(token=token, prefix=prefix)
+    max_playlist_tracks_raw = os.getenv("MAX_PLAYLIST_TRACKS", "").strip()
+    try:
+        max_playlist_tracks = int(max_playlist_tracks_raw) if max_playlist_tracks_raw else DEFAULT_MAX_PLAYLIST_TRACKS
+        if max_playlist_tracks <= 0:
+            raise ValueError
+    except ValueError:
+        logging.getLogger(__name__).warning(
+            "Invalid MAX_PLAYLIST_TRACKS value %r; falling back to %d.",
+            max_playlist_tracks_raw,
+            DEFAULT_MAX_PLAYLIST_TRACKS,
+        )
+        max_playlist_tracks = DEFAULT_MAX_PLAYLIST_TRACKS
+
+    return BotConfig(token=token, prefix=prefix, max_playlist_tracks=max_playlist_tracks)

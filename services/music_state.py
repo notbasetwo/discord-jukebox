@@ -7,7 +7,7 @@ import logging
 
 import discord
 
-from services.audio_source import Track
+from services.audio_source import AudioExtractionError, Track, resolve_track
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +139,20 @@ class GuildMusicState:
                         track.title,
                     )
                     continue
+
+                if track.stream_url is None:
+                    try:
+                        track = await resolve_track(track)
+                    except AudioExtractionError as exc:
+                        logger.warning(
+                            "Failed to resolve playlist track '%s' in guild %s: %s",
+                            track.title,
+                            self.guild.id,
+                            exc,
+                        )
+                        if self.text_channel is not None:
+                            await self.text_channel.send(f"Skipping unplayable track: **{track.title}**")
+                        continue
 
                 self.current = track
 

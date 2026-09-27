@@ -32,6 +32,15 @@ YTDL_FORMAT_OPTIONS: dict[str, Any] = {
     "source_address": "0.0.0.0",
 }
 
+# extract_flat avoids resolving every video's stream URL up front, so listing a playlist is fast.
+YTDL_PLAYLIST_OPTIONS: dict[str, Any] = {
+    **YTDL_FORMAT_OPTIONS,
+    "noplaylist": False,
+    "extract_flat": "in_playlist",
+}
+
+DEFAULT_MAX_PLAYLIST_TRACKS = 25
+
 # Reconnect flags prevent abrupt cutoffs on flaky streams/connections.
 FFMPEG_BEFORE_OPTIONS = (
     "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
@@ -42,18 +51,23 @@ FFMPEG_OPTIONS: dict[str, str] = {
 }
 
 _ytdl = yt_dlp.YoutubeDL(YTDL_FORMAT_OPTIONS)
+_ytdl_flat = yt_dlp.YoutubeDL(YTDL_PLAYLIST_OPTIONS)
 
 
 class AudioExtractionError(Exception):
     """Raised when yt-dlp fails to resolve a query into a playable stream."""
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, kw_only=True)
 class Track:
-    """A single queued/playable track with metadata for display purposes."""
+    """A single queued/playable track with metadata for display purposes.
+
+    ``stream_url`` is None for playlist entries that haven't been resolved yet;
+    see ``resolve_track``.
+    """
 
     title: str
-    stream_url: str
+    stream_url: str | None = None
     webpage_url: str
     duration: int | None
     uploader: str | None
@@ -61,6 +75,7 @@ class Track:
 
     def to_source(self) -> discord.PCMVolumeTransformer:
         """Build a fresh, playable Discord audio source for this track."""
+        assert self.stream_url is not None, "Track must be resolved before playback."
         ffmpeg_audio = discord.FFmpegPCMAudio(self.stream_url, **FFMPEG_OPTIONS)
         return discord.PCMVolumeTransformer(ffmpeg_audio)
 
@@ -123,3 +138,84 @@ async def extract_track(query: str, requester: discord.abc.User) -> Track:
         uploader=info.get("uploader"),
         requester=requester,
     )
+
+
+def _extract_playlist_sync(url: str) -> list[dict[str, Any]]:
+    """Blocking flat yt-dlp extraction. Must only be called from a worker thread."""
+    info = _ytdl_flat.extract_info(url, download=False)
+    if info is None:
+        raise AudioExtractionError(f"No results found for '{url}'.")
+
+    # A plain (non-playlist) video URL has no "entries"; treat it as a single-item playlist.
+    entries = info.get("entries")
+    if entries is None:
+        entries = [info]
+
+    entries = [entry for entry in entries if entry is not None]
+    if not entries:
+        raise AudioExtractionError(f"No playable videos found for '{url}'.")
+
+    return entries
+
+
+async def extract_playlist(
+    url: str,
+    requester: discord.abc.User,
+    max_tracks: int = DEFAULT_MAX_PLAYLIST_TRACKS,
+) -> list[Track]:
+    """Resolve a playlist URL into a list of lazily-resolved ``Track`` objects.
+
+    Each returned track has ``stream_url=None``; call ``resolve_track`` to fetch
+    its real audio stream right before playback.
+
+    Raises:
+        AudioExtractionError: If the playlist cannot be resolved or is empty.
+    """
+    try:
+        entries = await asyncio.to_thread(_extract_playlist_sync, url)
+    except AudioExtractionError:
+        raise
+    except yt_dlp.utils.DownloadError as exc:
+        logger.warning("yt-dlp failed to extract playlist '%s': %s", url, exc)
+        raise AudioExtractionError(f"Could not retrieve playlist for '{url}'.") from exc
+    except Exception as exc:  # noqa: BLE001 - surface as a domain error
+        logger.exception("Unexpected error extracting playlist '%s'", url)
+        raise AudioExtractionError(f"Unexpected error resolving playlist '{url}'.") from exc
+
+    tracks: list[Track] = []
+    for entry in entries[:max_tracks]:
+        webpage_url = entry.get("url") or entry.get("webpage_url")
+        if not webpage_url:
+            continue
+        if not webpage_url.startswith("http"):
+            webpage_url = f"https://www.youtube.com/watch?v={webpage_url}"
+
+        tracks.append(
+            Track(
+                title=entry.get("title") or "Unknown title",
+                webpage_url=webpage_url,
+                duration=entry.get("duration"),
+                uploader=entry.get("uploader"),
+                requester=requester,
+            )
+        )
+
+    if not tracks:
+        raise AudioExtractionError(f"No playable videos found in '{url}'.")
+
+    return tracks
+
+
+async def resolve_track(track: Track) -> Track:
+    """Return a fully resolved ``Track`` with a live stream URL.
+
+    If ``track`` was already resolved (has a ``stream_url``), it is returned
+    unchanged. Otherwise its ``webpage_url`` is re-extracted, refreshing both
+    the stream URL and metadata.
+
+    Raises:
+        AudioExtractionError: If the track cannot be resolved to audio.
+    """
+    if track.stream_url is not None:
+        return track
+    return await extract_track(track.webpage_url, track.requester)

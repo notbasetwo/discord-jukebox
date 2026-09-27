@@ -7,7 +7,7 @@ import logging
 import discord
 from discord.ext import commands
 
-from services.audio_source import AudioExtractionError, extract_track
+from services.audio_source import AudioExtractionError, extract_playlist, extract_track
 from services.music_state import GuildMusicState
 
 logger = logging.getLogger(__name__)
@@ -91,6 +91,37 @@ class MusicCog(commands.Cog, name="Music"):
 
         await state.enqueue(track)
         await ctx.send(f"Queued **{track.title}** ({track.duration_display})")
+
+    @commands.command(name="playlist", aliases=["pl"])
+    async def playlist(self, ctx: commands.Context[commands.Bot], *, query: str) -> None:
+        """Join your voice channel, resolve a playlist URL, and enqueue every track in it."""
+        if ctx.guild is None:
+            return
+
+        voice_client = await self._ensure_voice(ctx)
+        if voice_client is None:
+            return
+
+        state = self._get_state(ctx.guild)
+        state.text_channel = ctx.channel
+        state.voice_client = voice_client
+        state.start()
+
+        max_tracks = self.bot.config.max_playlist_tracks  # type: ignore[attr-defined]
+        async with ctx.typing():
+            try:
+                tracks = await extract_playlist(query, ctx.author, max_tracks)
+            except AudioExtractionError as exc:
+                await ctx.send(f"Could not queue that playlist: {exc}")
+                return
+
+        for track in tracks:
+            await state.enqueue(track)
+
+        if len(tracks) == max_tracks:
+            await ctx.send(f"Queued {len(tracks)} tracks (playlist truncated at {max_tracks}).")
+        else:
+            await ctx.send(f"Queued {len(tracks)} tracks from the playlist.")
 
     @commands.command(name="skip")
     async def skip(self, ctx: commands.Context[commands.Bot]) -> None:
@@ -186,6 +217,17 @@ class MusicCog(commands.Cog, name="Music"):
             await ctx.send("Usage: `!play <song name or URL>`")
         else:
             logger.exception("Unhandled error in play command", exc_info=error)
+            await ctx.send(f"An unexpected error occurred: {error}")
+
+    @playlist.error
+    async def playlist_error(
+        self, ctx: commands.Context[commands.Bot], error: commands.CommandError
+    ) -> None:
+        """Handle missing query argument for `playlist`."""
+        if isinstance(error, commands.MissingRequiredArgument):
+            await ctx.send("Usage: `!playlist <YouTube playlist URL>`")
+        else:
+            logger.exception("Unhandled error in playlist command", exc_info=error)
             await ctx.send(f"An unexpected error occurred: {error}")
 
     @commands.Cog.listener()

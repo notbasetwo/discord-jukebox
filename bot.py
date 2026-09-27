@@ -32,6 +32,7 @@ async def main() -> None:
     """Load configuration, register extensions, and run the bot."""
     config = load_config()
     bot = build_bot(config.prefix)
+    bot.config = config  # type: ignore[attr-defined]
 
     @bot.event
     async def on_ready() -> None:
