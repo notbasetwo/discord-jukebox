@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -18,6 +19,8 @@ class BotConfig:
     token: str
     prefix: str
     max_playlist_tracks: int
+    cookies_file: str | None
+    cookies_from_browser: str | None
 
 
 DEFAULT_MAX_PLAYLIST_TRACKS = 25
@@ -50,4 +53,18 @@ def load_config() -> BotConfig:
         )
         max_playlist_tracks = DEFAULT_MAX_PLAYLIST_TRACKS
 
-    return BotConfig(token=token, prefix=prefix, max_playlist_tracks=max_playlist_tracks)
+    cookies_file = os.getenv("COOKIES_FILE", "").strip() or None
+    if cookies_file and not Path(cookies_file).is_file():
+        raise RuntimeError(
+            f"COOKIES_FILE is set to '{cookies_file}' but no such file exists."
+        )
+
+    cookies_from_browser = os.getenv("COOKIES_FROM_BROWSER", "").strip() or None
+
+    return BotConfig(
+        token=token,
+        prefix=prefix,
+        max_playlist_tracks=max_playlist_tracks,
+        cookies_file=cookies_file,
+        cookies_from_browser=cookies_from_browser,
+    )

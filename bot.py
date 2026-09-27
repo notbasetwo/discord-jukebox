@@ -9,6 +9,7 @@ import discord
 from discord.ext import commands
 
 from config import load_config
+from services import audio_source
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,6 +32,7 @@ def build_bot(prefix: str) -> commands.Bot:
 async def main() -> None:
     """Load configuration, register extensions, and run the bot."""
     config = load_config()
+    audio_source.configure(config.cookies_file, config.cookies_from_browser)
     bot = build_bot(config.prefix)
     bot.config = config  # type: ignore[attr-defined]
 

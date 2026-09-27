@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -52,6 +53,45 @@ FFMPEG_OPTIONS: dict[str, str] = {
 
 _ytdl = yt_dlp.YoutubeDL(YTDL_FORMAT_OPTIONS)
 _ytdl_flat = yt_dlp.YoutubeDL(YTDL_PLAYLIST_OPTIONS)
+
+# Matches yt-dlp's CLI syntax: BROWSER[+KEYRING][:PROFILE][::CONTAINER]
+_COOKIES_FROM_BROWSER_RE = re.compile(
+    r"""(?x)
+    (?P<name>[^+:]+)
+    (?:\s*\+\s*(?P<keyring>[^:]+))?
+    (?:\s*:\s*(?!:)(?P<profile>.+?))?
+    (?:\s*::\s*(?P<container>.+))?
+    """
+)
+
+
+def _parse_cookies_from_browser(spec: str) -> tuple[str, str | None, str | None, str | None]:
+    """Parse a ``BROWSER[+KEYRING][:PROFILE][::CONTAINER]`` string into yt-dlp's tuple form."""
+    match = _COOKIES_FROM_BROWSER_RE.fullmatch(spec)
+    if match is None:
+        raise ValueError(f"Invalid COOKIES_FROM_BROWSER value: {spec!r}")
+    name, keyring, profile, container = match.group("name", "keyring", "profile", "container")
+    return name.lower(), profile, (keyring.upper() if keyring else None), container
+
+
+def configure(cookies_file: str | None = None, cookies_from_browser: str | None = None) -> None:
+    """Enable authenticated YouTube requests by attaching cookies to yt-dlp.
+
+    Call this once at startup (before any tracks are resolved) so age-restricted,
+    members-only, or otherwise sign-in-gated videos can be played.
+    """
+    global _ytdl, _ytdl_flat
+
+    if cookies_file:
+        YTDL_FORMAT_OPTIONS["cookiefile"] = cookies_file
+        YTDL_PLAYLIST_OPTIONS["cookiefile"] = cookies_file
+    if cookies_from_browser:
+        browser_spec = _parse_cookies_from_browser(cookies_from_browser)
+        YTDL_FORMAT_OPTIONS["cookiesfrombrowser"] = browser_spec
+        YTDL_PLAYLIST_OPTIONS["cookiesfrombrowser"] = browser_spec
+
+    _ytdl = yt_dlp.YoutubeDL(YTDL_FORMAT_OPTIONS)
+    _ytdl_flat = yt_dlp.YoutubeDL(YTDL_PLAYLIST_OPTIONS)
 
 
 class AudioExtractionError(Exception):

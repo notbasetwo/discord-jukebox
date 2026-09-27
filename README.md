@@ -21,3 +21,12 @@ The default prefix for this bot is `!`. The commands available are:
     - Replace the `BOT_PREFIX` value with the prefix for commands you wish the bot to use.
 - Configure a virtual environment ([tutorial](https://www.w3schools.com/python/python_virtualenv.asp)) and run `pip install -r requirements.txt`
 - Run the bot with `python bot.py`
+
+## Logging in with a YouTube Account (optional)
+By default the bot plays videos anonymously, which YouTube blocks for age-restricted,
+members-only, or otherwise sign-in-gated content. To let yt-dlp play those videos, give it
+your YouTube session via cookies. **Never use a username/password option with yt-dlp** — YouTube
+blocks that login method and it isn't supported here; cookies are the recommended approach.
+
+Pick **one** of the two options contained in [COOKIES.md](COOKIES.md).
+
